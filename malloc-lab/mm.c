@@ -26,9 +26,9 @@ team_t team = {
     /* Team name */
     "ateam",
     /* First member's full name */
-    "Harry Bovik",
+    "JiSeob Lee",
     /* First member's email address */
-    "bovik@cs.cmu.edu",
+    "@",
     /* Second member's full name (leave blank if none) */
     "",
     /* Second member's email address (leave blank if none) */
@@ -41,6 +41,33 @@ team_t team = {
 #define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~0x7)
 
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+
+/* Basic constants and macros */
+#define WSIZE = 4
+#define DSIZE = 8
+#define CHUNKSIZE (1 << 12)
+
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
+
+/* Pack a size and allocated bit into a word */
+#define PACK(size, alloc) ((size) | (alloc)) // header/footer에 저장될 크기 및 할당 정보가 담긴 형태의 바이트 데이터를 반환한다. (크기와 할당 비트를 통합해서 헤더와 풋터에 저장할 수 있는 값을 리턴)
+
+/* Read and write a word at address p */
+#define GET(p) (*(unsigned int *)(p))              // 인자 p가 참조하는 워드를 읽어서 리턴한다.
+#define PUT(p, val) (*(unsigned int *)(p) = (val)) // 인자 p가 가리키는 워드에 val을 저장한다.
+
+/* Read the size and allocated fields from address p */
+#define GET_SIZE(p) (GET(p) & ~0x7) // header 또는 footer에 있는 하위 3비트를 제외한 size 정보를 반환한다.
+#define GET_ALLOC(p) (GET(p) & 0x1) // header 또는 footer에 있는 할당 여부 비트를 반환한다.
+
+/* Given block ptr bp, compute address of its header and footer */
+#define HDRP(bp) ((char *)(bp) - WSIZE)                      // payload 시작 주소에서 WSIZE(4bytes) 전으로 이동하여 header 영역에 접근한다.
+#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE) // 현재 블록의 footer에 접근한다.(payload 시작 주소에서 header의 크기를 읽어서 현재 주소에서 더한다. 그 위치는 다음 블록의 payload이므로, 현재 블록의 footer에 접근하기 위해서 DSIZE(8바이트)를 빼준다.)
+
+/* Given block ptr bp, compute address of next and previous blocks */
+#define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE))) // 다음 블록의 payload 시작 주소를 반환한다.(현재 블록 헤더에서 크기를 가져와서 현재 payload 시작 주소에 더해준다.)
+#define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) // 이전 블록의 payload 시작 주소를 반환한다.(현재 payload 시작 위치에서 이전 블록의 footer를 통해 블록 size를 파악하여 빼준다.)
+
 
 /*
  * mm_init - initialize the malloc package.
