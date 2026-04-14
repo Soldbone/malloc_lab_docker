@@ -68,23 +68,12 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE))) // 다음 블록의 payload 시작 주소를 반환한다.(현재 블록 헤더에서 크기를 가져와서 현재 payload 시작 주소에 더해준다.)
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) // 이전 블록의 payload 시작 주소를 반환한다.(현재 payload 시작 위치에서 이전 블록의 footer를 통해 블록 size를 파악하여 빼준다.)
 
-/* 가용 블록의 PRED와 SUCC 포인터가 가리키는 주소를 읽어옴 (포인터는 DWORD 크기로 저장됨) */
-#define GET_PRED(bp) (*(void **)(bp))
-#define GET_SUCC(bp) (*(void **)((char *)(bp) + DSIZE)) // PRED(8) 다음 위치
-
-/* 가용 블록의 PRED와 SUCC 포인터에 주소값을 저장함 */
-#define SET_PRED(bp, ptr) (*(void **)(bp) = (ptr))
-#define SET_SUCC(bp, ptr) (*(void **)((char *)(bp) + DSIZE) = (ptr))
-
-static char *free_listp = NULL;
 static char *heap_listp = 0;
 
 static void *extend_heap(size_t words);
 static void *coalesce(void *p);
 static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
-static void insert_node(void *bp);
-static void remove_node(void *bp);
 
 /*
  * mm_init - initialize the malloc package.
@@ -99,8 +88,6 @@ int mm_init(void)
     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
     heap_listp += (2 * WSIZE);
-
-    free_listp = NULL;
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
@@ -131,23 +118,19 @@ static void *extend_heap(size_t words)
 static void *coalesce(void *bp)
 {
     size_t size = GET_SIZE(HDRP(bp));
-    size_t prev_alloc = GET_ALLOC((char *)bp - DSIZE);
-    size_t next_alloc = GET_ALLOC((char *)bp + size - WSIZE);
+    size_t prev_alloc = GET_ALLOC(bp - DSIZE);
+    size_t next_alloc = GET_ALLOC(bp + size - WSIZE);
     /* GET_SIZE(HDRP(PREV_BLKP(bp))) == 이전 블록 헤더 == 이전 블록 푸터 == GET_SIZE(bp - DSIZE) */
     /* GET_SIZE(FTRP(NEXT_BLKP(bp))) == 다음 블록 푸터 == 다음 블록 헤더 == GET_SIZE(bp + size - WSIZE) */
 
-    /* 앞뒤 모두 할당된 경우에는 아무것도 안 해도 됨 */
-    // if (prev_alloc && next_alloc)
-    // {
-    //     return bp;
-    // }
-
-    if (prev_alloc && !next_alloc)
+    if (prev_alloc && next_alloc)
     {
-        void *next_bp = NEXT_BLKP(bp);
+        return bp;
+    }
 
-        remove_node(next_bp);
-        size += GET_SIZE(HDRP(next_bp));
+    else if (prev_alloc && !next_alloc)
+    {
+        size += GET_SIZE(bp + size - WSIZE);
 
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
@@ -155,84 +138,26 @@ static void *coalesce(void *bp)
 
     else if (!prev_alloc && next_alloc)
     {
-        void *prev_bp = PREV_BLKP(bp);
+        size_t prev_size = GET_SIZE(bp - DSIZE);
+        size += prev_size;
 
-        remove_node(prev_bp);            // PREV_BLKP(bp)
-        size += GET_SIZE(HDRP(prev_bp)); // GET_SIZE(FTRP(PREV_BLKP(bp)))
-
-        bp = prev_bp;
+        bp = bp - prev_size;
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
     }
 
-    else if (!prev_alloc && !next_alloc)
+    else
     {
-        void *prev_bp = PREV_BLKP(bp);
-        void *next_bp = NEXT_BLKP(bp);
+        size_t prev_size = GET_SIZE(bp - DSIZE);
+        size_t next_size = GET_SIZE(bp + size - WSIZE);
+        size += prev_size + next_size;
 
-        remove_node(prev_bp);
-        remove_node(next_bp);
-
-        size += GET_SIZE(HDRP(prev_bp)) + GET_SIZE(HDRP(next_bp));
-
-        bp = prev_bp;
+        bp = bp - prev_size;
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
     }
 
-    insert_node(bp);
     return bp;
-}
-
-static void insert_node(void *bp)
-{
-    void *curr = free_listp;
-    void *prev = NULL;
-
-    // bp의 주소보다 큰 주소를 가진 curr가 나올 때까지 탐색
-    while (curr != NULL && bp > curr)
-    {
-        prev = curr;
-        curr = GET_SUCC(curr);
-    }
-
-    // bp의 SUCC, PRED 설정
-    SET_SUCC(bp, curr);
-    SET_PRED(bp, prev);
-
-    if (prev != NULL)
-    {
-        SET_SUCC(prev, bp);
-    }
-    else
-    {
-        free_listp = bp;
-    }
-
-    if (curr != NULL)
-    {
-        SET_PRED(curr, bp);
-    }
-}
-
-static void remove_node(void *bp)
-{
-    if (bp == NULL)
-        return;
-
-    if (GET_PRED(bp) != NULL)
-    {
-        SET_SUCC(GET_PRED(bp), GET_SUCC(bp));
-    }
-    else
-    {
-        free_listp = GET_SUCC(bp); // 맨 앞 블록을 제거하는 경우
-    }
-
-    if (GET_SUCC(bp) != NULL)
-    {
-        SET_PRED(GET_SUCC(bp), GET_PRED(bp));
-    }
 }
 
 /*
@@ -250,8 +175,8 @@ void *mm_malloc(size_t size)
         return NULL;
 
     /* Adjust block size to include overhead and alignment reqs. */
-    if (size <= 2 * DSIZE)
-        asize = 3 * DSIZE;
+    if (size <= DSIZE)
+        asize = 2 * DSIZE;
     else
         asize = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
 
@@ -285,9 +210,17 @@ static void *find_fit(size_t asize)
     /* First-fit search */
     void *bp;
 
-    for (bp = free_listp; bp != NULL; bp = GET_SUCC(bp))
+    for (bp = heap_listp;; bp = NEXT_BLKP(bp))
     {
-        if (asize <= GET_SIZE(HDRP(bp)))
+        size_t curr_size = GET_SIZE(HDRP(bp));
+
+        // 에필로그 헤더를 만나면 종료
+        if (curr_size == 0)
+        {
+            break;
+        }
+
+        if (!GET_ALLOC(bp - WSIZE) && (asize <= curr_size))
         {
             return bp;
         }
@@ -298,16 +231,14 @@ static void *find_fit(size_t asize)
 static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp)); // current_size
-    remove_node(bp);                   // 할당될 예정이므로 리스트에서 제거
 
-    if ((csize - asize) >= 24) // 헤더 4 / pred 8 / succ 8 / 풋터 4
+    if ((csize - asize) >= (2 * DSIZE))
     {
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
-        bp = (char *)bp + asize; // NEXT_BLKP(bp)
+        bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize - asize, 0));
         PUT(FTRP(bp), PACK(csize - asize, 0));
-        insert_node(bp);
     }
     else
     {
