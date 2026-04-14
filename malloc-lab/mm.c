@@ -205,6 +205,48 @@ void *mm_malloc(size_t size)
     // }
 }
 
+static void *find_fit(size_t asize)
+{
+    /* First-fit search */
+    void *bp;
+
+    for (bp = heap_listp;; bp = NEXT_BLKP(bp))
+    {
+        size_t curr_size = GET_SIZE(HDRP(bp));
+
+        // 에필로그 헤더를 만나면 종료
+        if (curr_size == 0)
+        {
+            break;
+        }
+
+        if (!GET_ALLOC(bp - WSIZE) && (asize <= curr_size))
+        {
+            return bp;
+        }
+    }
+    return NULL;
+}
+
+static void place(void *bp, size_t asize)
+{
+    size_t csize = GET_SIZE(HDRP(bp)); // current_size
+
+    if ((csize - asize) >= (2 * DSIZE))
+    {
+        PUT(HDRP(bp), PACK(asize, 1));
+        PUT(FTRP(bp), PACK(asize, 1));
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(csize - asize, 0));
+        PUT(FTRP(bp), PACK(csize - asize, 0));
+    }
+    else
+    {
+        PUT(HDRP(bp), PACK(csize, 1));
+        PUT(FTRP(bp), PACK(csize, 1));
+    }
+}
+
 /*
  * mm_free - Freeing a block does nothing.
  */
@@ -226,12 +268,26 @@ void *mm_realloc(void *ptr, size_t size)
     void *newptr;
     size_t copySize;
 
+    if (size == 0)
+    {
+        mm_free(ptr);
+        return NULL;
+    }
+
+    if (ptr == NULL)
+    {
+        return mm_malloc(size);
+    }
+
     newptr = mm_malloc(size);
     if (newptr == NULL)
         return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
+
+    copySize = GET_SIZE(HDRP(oldptr)) - DSIZE;
+
     if (size < copySize)
         copySize = size;
+
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
